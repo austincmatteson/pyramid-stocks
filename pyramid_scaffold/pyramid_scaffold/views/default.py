@@ -1,33 +1,74 @@
-from pyramid.response import Response
+# from pyramid.response import Response
 from pyramid.view import view_config
 
-from sqlalchemy.exc import DBAPIError
+from ..sample_data import MOCK_ENTRIES
+from pyramid.httpexceptions import HTTPFound, HTTPNotFound
 
-from ..models import MyModel
 
-
-@view_config(route_name='home', renderer='../templates/index.jinja2')
+@view_config(
+    route_name='home',
+    renderer='../templates/index.jinja2',
+    request_method='GET')
 def my_home_view(request):
     return {}
 
 
-@view_config(route_name='auth', renderer='../templates/register.jinja2')
+@view_config(
+    route_name='auth',
+    renderer='../templates/auth.jinja2'
+    )
 def my_auth_view(request):
-    return {}
+    if request.method == 'GET':
+        try:
+            username = request.GET['username']
+            password = request.GET['password']
+            print('User: {}, Pass: {}'.format(username, password))
+
+            return HTTPFound(location=request.route_url('portfolio'))
+
+        except KeyError:
+            return {}
+
+    if request.method == 'POST':
+        username = request.POST['username']
+        email = request.POST['email']
+        password = request.POST['password']
+        print('User: {}, Pass: {}, Email: {}'.format(username, password,
+                                                     email))
+
+        return HTTPFound(location=request.route_url('portfolio'))
+
+    return HTTPNotFound()
 
 
-@view_config(route_name='stock', renderer='../templates/stock-add.jinja2')
+@view_config(
+    route_name='portfolio',
+    renderer='../templates/portfolio.jinja2',
+    request_method='GET')
+def my_portfolio_view(request):
+    return {
+        'entries':
+            MOCK_ENTRIES
+    }
+
+
+@view_config(
+    route_name='stock',
+    renderer='../templates/stock-add.jinja2',
+    request_method='GET')
 def my_stock_view(request):
     return {}
 
 
-@view_config(route_name='portfolio', renderer='../templates/portfolio.jinja2')
-def my_portfolio_view(request):
-    return {}
-
-
-@view_config(route_name='detail', renderer='../templates/stock-detail.jinja2')
+@view_config(
+    route_name='detail',
+    renderer='../templates/stock-detail.jinja2',
+    request_method='GET')
 def my_detail_view(request):
+    symbol = request.matchdict['symbol']
+    for stock in MOCK_ENTRIES:
+        if stock['symbol'] == symbol:
+            return {'stock': stock}
     return {}
 
 
