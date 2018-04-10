@@ -1,8 +1,12 @@
 # from pyramid.response import Response
 from pyramid.view import view_config
+import requests
+from sqlalchemy.exc import DBAPIError, IntegrityError
+from ..models import Stock
+from pyramid.httpexceptions import HTTPFound, HTTPNotFound, HTTPBadRequest
 
-from ..sample_data import MOCK_ENTRIES
-from pyramid.httpexceptions import HTTPFound, HTTPNotFound
+
+API_URL = 'https://api.iextrading.com/1.0'
 
 
 @view_config(
@@ -46,18 +50,61 @@ def my_auth_view(request):
     renderer='../templates/portfolio.jinja2',
     request_method='GET')
 def my_portfolio_view(request):
-    return {
-        'entries':
-            MOCK_ENTRIES
-    }
+    try:
+        query = request.dbsession.query(Stock)
+        all_entries = query.all()
+    except DBAPIError:
+        return DBAPIError(db_err_msg, content_type='text/plain', status=500)
+
+    return {'entries': all_entries}
 
 
 @view_config(
     route_name='stock',
-    renderer='../templates/stock-add.jinja2',
-    request_method='GET')
+    renderer='../templates/stock-add.jinja2')
 def my_stock_view(request):
-    return {}
+    if request.method == 'POST':
+        fields = ['companyName', 'symbol']
+
+        if not all([field in request.POST for field in fields]):
+            return HTTPBadRequest()
+
+        try:
+            stock = {
+                'companyName': request.POST['companyName'],
+                'symbol': request.POST['symbol'],
+                'exchange': request.POST['exchange'],
+                'website': request.POST['website'],
+                'CEO': request.POST['CEO'],
+                'industry': request.POST['industry'],
+                'sector': request.POST['sector'],
+                'issueType': request.POST['issueType'],
+                'description': request.POST['description'],
+            }
+            stock = Stock(**stock)
+        except KeyError:
+            pass
+
+        try:
+            request.dbsession.add(stock)
+            request.dbsession.flush()
+        except IntegrityError:
+            pass
+
+        return HTTPFound(location=request.route_url('portfolio'))
+
+    if request.method == 'GET':
+        try:
+            symbol = request.GET['symbol']
+        except KeyError:
+            return {}
+
+        response = requests.get(API_URL + '/stock/{}/company'.format(symbol))
+        data = response.json()
+        return {'company': data}
+
+    else:
+        raise HTTPNotFound()
 
 
 @view_config(
@@ -65,11 +112,17 @@ def my_stock_view(request):
     renderer='../templates/stock-detail.jinja2',
     request_method='GET')
 def my_detail_view(request):
-    symbol = request.matchdict['symbol']
-    for stock in MOCK_ENTRIES:
-        if stock['symbol'] == symbol:
-            return {'stock': stock}
-    return {}
+    try:
+        stock = request.matchdict['symbol']
+    except IndexError:
+        return HTTPNotFound()
+
+    try:
+        query = request.dbsession.query(Stock)
+        entry_detail = query.filter(Stock.symbol == stock).first()
+    except DBAPIError:
+        return DBAPIError(db_err_msg, content_type='text/plain', status=500)
+    return {"stock": entry_detail}
 
 
 db_err_msg = """\
