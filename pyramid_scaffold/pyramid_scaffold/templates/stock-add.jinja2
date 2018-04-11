@@ -9,6 +9,7 @@
 
 {% if company %}
 <form action="{{request.route_url('stock')}}" method="POST">
+  <input type="hidden" name="csrf_token" value="{{request.session.get_csrf_token()}}">
   <input type="text" name="companyName" value={{company.companyName}} hidden required readonly>
   <input type="text" name="symbol" value={{company.symbol}} hidden required readonly>
   <input type="text" name="exchange" value={{company.exchange}} hidden readonly>

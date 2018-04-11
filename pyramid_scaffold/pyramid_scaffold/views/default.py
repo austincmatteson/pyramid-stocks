@@ -1,9 +1,11 @@
-# from pyramid.response import Response
+from pyramid.response import Response
 from pyramid.view import view_config
+from pyramid.security import NO_PERMISSION_REQUIRED, remember, forget
 import requests
 from sqlalchemy.exc import DBAPIError, IntegrityError
-from ..models import Stock
-from pyramid.httpexceptions import HTTPFound, HTTPNotFound, HTTPBadRequest
+from ..models import Stock, Account
+from pyramid.httpexceptions import (HTTPFound, HTTPNotFound, HTTPBadRequest,
+                                    HTTPUnauthorized, HTTPConflict)
 
 
 API_URL = 'https://api.iextrading.com/1.0'
@@ -12,35 +14,60 @@ API_URL = 'https://api.iextrading.com/1.0'
 @view_config(
     route_name='home',
     renderer='../templates/index.jinja2',
-    request_method='GET')
+    request_method='GET',
+    permission=NO_PERMISSION_REQUIRED)
 def my_home_view(request):
     return {}
 
 
 @view_config(
     route_name='auth',
-    renderer='../templates/auth.jinja2'
-    )
+    renderer='../templates/auth.jinja2',
+    permission=NO_PERMISSION_REQUIRED)
 def my_auth_view(request):
     if request.method == 'GET':
         try:
             username = request.GET['username']
             password = request.GET['password']
-            print('User: {}, Pass: {}'.format(username, password))
-
-            return HTTPFound(location=request.route_url('portfolio'))
 
         except KeyError:
             return {}
 
-    if request.method == 'POST':
-        username = request.POST['username']
-        email = request.POST['email']
-        password = request.POST['password']
-        print('User: {}, Pass: {}, Email: {}'.format(username, password,
-                                                     email))
+        is_authenticated = Account.check_credentials(
+            request, username, password)
+        if is_authenticated[0]:
+            headers = remember(request, userid=username)
+            return HTTPFound(location=request.route_url('portfolio'),
+                             headers=headers)
+        else:
+            return HTTPUnauthorized()
 
-        return HTTPFound(location=request.route_url('portfolio'))
+    if request.method == 'POST':
+        try:
+            username = request.POST['username']
+            email = request.POST['email']
+            password = request.POST['password']
+        except KeyError:
+            return HTTPBadRequest()
+
+        try:
+            instance = Account(
+                username=username,
+                email=email,
+                password=password,
+            )
+
+            headers = remember(request, userid=instance.username)
+            try:
+                request.dbsession.add(instance)
+                request.dbsession.flush()
+            except IntegrityError:
+                return HTTPConflict()
+            return HTTPFound(location=request.route_url('portfolio'),
+                             headers=headers)
+
+        except DBAPIError:
+            return Response(db_err_msg, content_type='text/plain', status=500)
 
     return HTTPNotFound()
 
@@ -64,8 +91,8 @@ def my_portfolio_view(request):
     renderer='../templates/stock-add.jinja2')
 def my_stock_view(request):
     if request.method == 'POST':
-        fields = ['companyName', 'symbol']
-
+        fields = ['companyName', 'symbol', 'exchange', 'website', 'CEO',
+                  'industry', 'sector', 'issueType', 'description']
         if not all([field in request.POST for field in fields]):
             return HTTPBadRequest()
 
@@ -89,7 +116,7 @@ def my_stock_view(request):
             request.dbsession.add(stock)
             request.dbsession.flush()
         except IntegrityError:
-            pass
+            return HTTPConflict()
 
         return HTTPFound(location=request.route_url('portfolio'))
 
@@ -114,7 +141,7 @@ def my_stock_view(request):
 def my_detail_view(request):
     try:
         stock = request.matchdict['symbol']
-    except IndexError:
+    except (KeyError, IndexError):
         return HTTPNotFound()
 
     try:
@@ -123,6 +150,12 @@ def my_detail_view(request):
     except DBAPIError:
         return DBAPIError(db_err_msg, content_type='text/plain', status=500)
     return {"stock": entry_detail}
+
+
+@view_config(route_name='logout')
+def logout(request):
+    headers = forget(request)
+    return HTTPFound(location=request.route_url('home'), headers=headers)
 
 
 db_err_msg = """\
