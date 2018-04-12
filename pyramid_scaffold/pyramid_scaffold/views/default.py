@@ -78,12 +78,15 @@ def my_auth_view(request):
     request_method='GET')
 def my_portfolio_view(request):
     try:
-        query = request.dbsession.query(Stock)
-        all_entries = query.all()
+        query = request.dbsession.query(Account)
+        user_entries = query.filter(
+            Account.username == request.authenticated_userid).first()
     except DBAPIError:
-        return DBAPIError(db_err_msg, content_type='text/plain', status=500)
-
-    return {'entries': all_entries}
+        return Response(db_err_msg, content_type='text/plain', status=500)
+    if user_entries:
+        return {'entries': user_entries.stock_id}
+    else:
+        return HTTPNotFound()
 
 
 @view_config(
@@ -96,27 +99,33 @@ def my_stock_view(request):
         if not all([field in request.POST for field in fields]):
             return HTTPBadRequest()
 
-        try:
-            stock = {
-                'companyName': request.POST['companyName'],
-                'symbol': request.POST['symbol'],
-                'exchange': request.POST['exchange'],
-                'website': request.POST['website'],
-                'CEO': request.POST['CEO'],
-                'industry': request.POST['industry'],
-                'sector': request.POST['sector'],
-                'issueType': request.POST['issueType'],
-                'description': request.POST['description'],
-            }
-            stock = Stock(**stock)
-        except KeyError:
-            pass
+        query = request.dbsession.query(Account)
+        instance = query.filter(
+            Account.username == request.authenticated_userid).first()
 
-        try:
-            request.dbsession.add(stock)
-            request.dbsession.flush()
-        except IntegrityError:
-            return HTTPConflict()
+        query = request.dbsession.query(Stock)
+        instance2 = query.filter(
+            Stock.symbol == request.POST['symbol']).first()
+        if instance2:
+            instance2.account_id.append(instance)
+        else:
+            new = Stock()
+            new.account_id.append(instance)
+            new.companyName = request.POST['companyName']
+            new.symbol = request.POST['symbol']
+            new.exchange = request.POST['exchange']
+            new.website = request.POST['website']
+            new.CEO = request.POST['CEO']
+            new.industry = request.POST['industry']
+            new.sector = request.POST['sector']
+            new.issueType = request.POST['issueType']
+            new.description = request.POST['description']
+
+            try:
+                request.dbsession.add(new)
+                request.dbsession.flush()
+            except IntegrityError:
+                pass
 
         return HTTPFound(location=request.route_url('portfolio'))
 
@@ -147,9 +156,13 @@ def my_detail_view(request):
     try:
         query = request.dbsession.query(Stock)
         entry_detail = query.filter(Stock.symbol == stock).first()
+        for item in entry_detail.account_id:
+            if item.username == request.authenticated_userid:
+                return {'stock': entry_detail}
+        raise HTTPNotFound()
+
     except DBAPIError:
-        return DBAPIError(db_err_msg, content_type='text/plain', status=500)
-    return {"stock": entry_detail}
+        return Response(db_err_msg, content_type='text/plain', status=500)
 
 
 @view_config(route_name='logout')
